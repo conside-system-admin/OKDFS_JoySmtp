@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="shift_jis" standalone="yes"?>
+<NaccsSendMessage>
+  <MessageType>SYG</MessageType>
+  <GyomuCd></GyomuCd>
+  <SystemType>2</SystemType>
+  <Message></Message>
+</NaccsSendMessage>
