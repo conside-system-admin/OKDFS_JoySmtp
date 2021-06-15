@@ -4,13 +4,6 @@ Microsoft Visual Studio Solution File, Format Version 11.00
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "JoySmtp", "JoySmtp\JoySmtp.csproj", "{E8E70274-B73C-4EA2-B852-7B8212E1A247}"
 EndProject
 Global
-	GlobalSection(SourceCodeControl) = preSolution
-		SccNumberOfProjects = 2
-		SccLocalPath0 = .
-		SccProjectUniqueName1 = JoySmtp\\JoySmtp.csproj
-		SccLocalPath1 = .
-		SccProjectFilePathRelativizedFromConnection1 = JoySmtp\\
-	EndGlobalSection
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x86 = Debug|x86
 		Release|x86 = Release|x86

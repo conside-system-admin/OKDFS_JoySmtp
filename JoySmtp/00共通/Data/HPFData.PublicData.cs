@@ -55,6 +55,8 @@ namespace JoySmtp.Data
         private static String i_strDBName;
         private static int i_intSendTimer;
         private static int i_intSYGTimer;
+        private static int i_intMailSendLimit;
+        private static int i_intTimeoutLimitTime;
 
         private static DataTable i_tblNaccsErrCd;
         private static DataTable i_tblNaccsErrCdSub;
@@ -299,7 +301,22 @@ namespace JoySmtp.Data
             set { i_intSYGTimer = value; }
             get { return i_intSYGTimer; }
         }
-
+        /// <summary>
+        /// メール送信の期間
+        /// </summary>
+        public static int MailSendLimit
+        {
+            set { i_intMailSendLimit = value; }
+            get { return i_intMailSendLimit; }
+        }
+        /// <summary>
+        /// DB確認のタイマー期間
+        /// </summary>
+        public static int TimeoutLimitTime
+        {
+            set { i_intTimeoutLimitTime = value; }
+            get { return i_intTimeoutLimitTime; }
+        }
         /// <summary>
         /// NaccsErrCdデータテーブル
         /// </summary>

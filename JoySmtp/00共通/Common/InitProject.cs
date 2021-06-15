@@ -93,6 +93,11 @@ namespace JoySmtp.JoyCommon
         private const int INTERVAL_SEND_TIMER_DEFAULT = 60;
         private const int INTERVAL_SYG_TIMER_DEFAULT = 300;
 
+        private const string MAIL_SEND_LIMIT = "MailSendLimit";
+        private const int MAIL_SEND_LIMIT_DEFAULT = 10;
+
+        private const string TIME_OUT_LIMIT = "TimeOutLimit";
+        private const int TIME_OUT_LIMIT_DEFAULT = 120;
 
         
         /// <summary>
@@ -344,9 +349,18 @@ namespace JoySmtp.JoyCommon
                 var str = GetAppSetting(INTERVAL_SEND_TIMER);
                 if (string.IsNullOrWhiteSpace(str)){    HPFData.IntervalSendTimer = INTERVAL_SEND_TIMER_DEFAULT;    }
                 else { HPFData.IntervalSendTimer = Convert.ToInt32(str); }
+
                 str = GetAppSetting(INTERVAL_SYG_TIMER);
                 if (string.IsNullOrWhiteSpace(str)) { HPFData.IntervalSYGTimer = INTERVAL_SYG_TIMER_DEFAULT; }
                 else { HPFData.IntervalSYGTimer = Convert.ToInt32(str); }
+
+                str = GetAppSetting(MAIL_SEND_LIMIT);
+                if (string.IsNullOrWhiteSpace(str)) { HPFData.MailSendLimit = MAIL_SEND_LIMIT_DEFAULT; }
+                else { HPFData.MailSendLimit = Convert.ToInt32(str); }
+
+                str = GetAppSetting(TIME_OUT_LIMIT);
+                if (string.IsNullOrWhiteSpace(str)) { HPFData.TimeoutLimitTime = TIME_OUT_LIMIT_DEFAULT; }
+                else { HPFData.TimeoutLimitTime = Convert.ToInt32(str); }
 
                 str = GetAppSetting(Data.HPFData.TEST_FLG_SHORI_SHIKIBETSU);
                 if (str.Length > 0)

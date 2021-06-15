@@ -554,6 +554,7 @@ namespace JoySmtp.Nac
             strSql.AppendFormat("  ,{0}.SURYO_TANI_CD2 as SURYO_TANI_CD2", strDTbl).AppendLine();
             strSql.AppendFormat("  ,{0}.KAZEI_KAKAKU as KAZEI_KAKAKU", strDTbl).AppendLine();
             strSql.AppendFormat("  ,{0}.NAIKOKU_SHOHIZEITOU_SHUBETSU_CD as NAIKOKU_SHOHIZEITOU_SHUBETSU_CD", strDTbl).AppendLine();
+            strSql.AppendFormat("  ,{0}.NAIKOKU_SHOHIZEITOU_SHUBETSU_CD2 as NAIKOKU_SHOHIZEITOU_SHUBETSU_CD2", strDTbl).AppendLine();
 
             strSql.AppendFormat("FROM T_PAX_D AS {0}", strDTbl).AppendLine();
 
@@ -794,7 +795,7 @@ namespace JoySmtp.Nac
         /// EDIの送信済みフラグを立てるH①
         /// </summary>
         /// <returns></returns>
-        public static string GetSQL_UPDATE_SEND_H_ERR(string strPaxNo, string strEdaNo, string strErr)
+        public static string GetSQL_UPDATE_SEND_H_ERR(string strPaxNo, string strEdaNo, string strErr, string strErrDetail)
         {
             StringBuilder strSql = new StringBuilder();
 
@@ -807,8 +808,7 @@ namespace JoySmtp.Nac
             //状態を【5:NACCSエラー】にする suzuki ed
 
             strSql.AppendFormat("  ,ERROR_NAIYO = '{0}'",strErr).AppendLine();
-            //strSql.AppendFormat("  ,EDI_RESULT = '{0}'", strErr).AppendLine();
-            strSql.AppendFormat("  ,EDI_RESULT = (IIF(EDI_RESULT IS NULL, '{0}', EDI_RESULT + ',' + '{0}'))", strErr).AppendLine();
+            strSql.AppendFormat("  ,EDI_RESULT = '{0}'", strErrDetail).AppendLine();
 
             strSql.AppendFormat("  ,EDI_RESULT_SEQ = NULL", "").AppendLine();
             strSql.AppendFormat("  ,EDI_INFO_CD = NULL", "").AppendLine();
@@ -1097,12 +1097,93 @@ namespace JoySmtp.Nac
                 {
                     string strtype = "T_PAX_Hに該当データなし";
                     string str = string.Format("{0}(strYunyuNo:{1} type:{2})", strtype, strYunyuNo, type.ToString() );
-                    LogOut.ErrorOut(str, "ProcessInputModel", MethodBase.GetCurrentMethod().Name, true, strtype);
+                    LogOut.ErrorOut(str, "ProcessInputModel", MethodBase.GetCurrentMethod().Name, false, strType: strtype);
                     objDb.RollBack();
                     return false;
                 }
 
                 objDb.Commit();
+                return true;
+            }
+            catch (Exception e)
+            {
+                if (objDb != null)
+                {
+                    objDb.RollBack();
+                }
+                LogOut.ErrorOut(e.Message, "ProcessInputModel", MethodBase.GetCurrentMethod().Name);
+                return false;
+            }
+            finally
+            {
+                if (objDb != null)
+                {
+                    objDb.DBLogOut();
+                }
+            }
+        }
+        public static Boolean SetDBErrorT_PAX_H(DBEdiSend senddata,string strErr, string strErrDetail)
+        {
+            DataBaseSQL objDb = null;
+            try
+            {
+                objDb = new DataBaseSQL();
+                objDb.DBLogIn();
+                int intRet = 0;
+
+                objDb.BeginTransaction();
+
+                objDb.ExecuteNonQuery(
+                    GetSQL_UPDATE_SEND_H_ERR(senddata.PAX_NO, senddata.EDA_NO, strErr, strErrDetail), null, out intRet);
+                if (intRet == 0)
+                {
+                    string strtype = "T_PAX_Hに該当データなし";
+                    string str = string.Format("{0}(strYunyuNo:{1} eda:{2})", strtype, senddata.PAX_NO, senddata.EDA_NO);
+                    LogOut.ErrorOut(str, "ProcessInputModel", MethodBase.GetCurrentMethod().Name);
+                    objDb.RollBack();
+                    return false;
+                }
+
+                objDb.Commit();
+                return true;
+            }
+            catch (Exception e)
+            {
+                if (objDb != null)
+                {
+                    objDb.RollBack();
+                }
+                LogOut.ErrorOut(e.Message, "ProcessInputModel", MethodBase.GetCurrentMethod().Name);
+                return false;
+            }
+            finally
+            {
+                if (objDb != null)
+                {
+                    objDb.DBLogOut();
+                }
+            }
+        }
+        /// <summary>
+        /// 受信したデータ結果をUPDATEする
+        /// </summary>
+        /// <param name="recv">SAD401</param>
+        /// <returns></returns>        
+        public static Boolean SetDBT_PAX_H(DBEdiSend senddata)
+        {
+            DataBaseSQL objDb = null;
+            try
+            {
+                objDb = new DataBaseSQL();
+                objDb.DBLogIn();
+                int intRet = 0;
+
+                objDb.BeginTransaction();
+
+                objDb.ExecuteNonQuery(GetSQL_UPDATE_T_PAX_H(senddata), null, out intRet);
+
+                objDb.Commit();
+
                 return true;
             }
             catch (Exception e)
@@ -1268,6 +1349,70 @@ namespace JoySmtp.Nac
             return strSql.ToString();
         }
 
+
+        /// <summary>
+        /// DBを更新 一括更新
+        /// </summary>
+        /// <returns></returns>
+        public static string GetSQL_UPDATE_T_PAX_H(DBEdiSend select)
+        {
+            StringBuilder strSql = new StringBuilder();
+
+            strSql.AppendLine("UPDATE T_PAX_H SET");
+            strSql.AppendFormat("  T_PAX_H.UPD_STAFF_CD = '{0}'", HPFData.AppUserName).AppendLine();
+            strSql.AppendFormat("  ,T_PAX_H.UPD_DATE = GETDATE()", "").AppendLine();
+            strSql.AppendFormat("  ,T_PAX_H.UPD_TANMATU_ID = '{0}'", Environment.MachineName).AppendLine();
+            strSql.AppendFormat("  ,T_PAX_H.VERSION_NO = T_PAX_H.VERSION_NO + 1", "").AppendLine();
+
+            strSql.AppendLine("  ,T_PAX_H.YUNYU_SHINKOKU_NO = T_EDI_SEND.YUNYU_SHINKOKU_NO");
+            strSql.AppendLine("  ,T_PAX_H.ERROR_NAIYO = T_EDI_SEND.ERROR_NAIYO");
+            strSql.AppendLine("  ,T_PAX_H.EDI_RESULT = T_EDI_SEND.EDI_RESULT");
+            if (select.FLG_RESULT != null && select.FLG_RESULT > 0)
+            {
+                strSql.AppendLine("  ,T_PAX_H.EDI_RESULT_SEQ = T_EDI_SEND.FLG_RESULT");
+            }
+            strSql.AppendLine("  ,T_PAX_H.TORIKOMI_JOTAI = T_EDI_SEND.TORIKOMI_JOTAI");
+            strSql.AppendLine("  ,T_PAX_H.TIME_OF_IMPORT_PERMIT = GETDATE()");
+            strSql.AppendLine("  ,T_PAX_H.IMPORT_PERMIT_NO = T_EDI_SEND.YUNYU_SHINKOKU_NO");
+            strSql.AppendLine("FROM T_EDI_SEND");
+
+            strSql.AppendLine("WHERE 1=1");
+
+            strSql.AppendFormat("  AND DATA_SEQ = {0}", select.DATA_SEQ).AppendLine();
+            strSql.AppendLine("  AND T_PAX_H.TIME_OF_DEPARTURE = T_EDI_SEND.TIME_OF_DEPARTURE");
+            strSql.AppendLine("  AND T_PAX_H.FLIGHT_ID = T_EDI_SEND.FLIGHT_ID");
+            strSql.AppendLine("  AND T_PAX_H.PAX_NO = T_EDI_SEND.PAX_NO");
+            strSql.AppendLine("  AND T_PAX_H.EDA_NO = T_EDI_SEND.EDA_NO");
+            strSql.AppendLine("  AND T_PAX_H.DELETE_FLG IS NULL").AppendLine();
+
+
+            //strSql.AppendLine("UPDATE T_PAX_H SET");
+            //strSql.AppendFormat("  UPD_STAFF_CD = '{0}'", HPFData.AppUserName).AppendLine();
+            //strSql.AppendFormat("  ,UPD_DATE = GETDATE()", "").AppendLine();
+            //strSql.AppendFormat("  ,UPD_TANMATU_ID = '{0}'", Environment.MachineName).AppendLine();
+            //strSql.AppendFormat("  ,VERSION_NO = VERSION_NO + 1", "").AppendLine();
+            
+            //strSql.AppendFormat("  ,YUNYU_SHINKOKU_NO = '{0}'", select.YUNYU_SHINKOKU_NO).AppendLine();
+            //strSql.AppendFormat("  ,ERROR_NAIYO = (SELECT TOP 1 ERROR_NAIYO FROM T_EDI_SEND WHERE DATA_SEQ = '{0}')", select.DATA_SEQ).AppendLine();
+            //strSql.AppendFormat("  ,EDI_RESULT = (SELECT TOP 1 EDI_RESULT FROM T_EDI_SEND WHERE DATA_SEQ = '{0}')", select.DATA_SEQ).AppendLine();
+            //if (select.FLG_RESULT != null && select.FLG_RESULT > 0)
+            //{
+            //    strSql.AppendFormat("  ,EDI_RESULT_SEQ = {0}", select.FLG_RESULT).AppendLine();
+            //}
+            //strSql.AppendFormat("  ,TORIKOMI_JOTAI = '{0}'", select.TORIKOMI_JOTAI).AppendLine();
+            //strSql.AppendFormat("  ,TIME_OF_IMPORT_PERMIT = GETDATE()", "").AppendLine();
+            //strSql.AppendFormat("  ,IMPORT_PERMIT_NO = '{0}'", select.YUNYU_SHINKOKU_NO).AppendLine();
+
+            //strSql.AppendLine("WHERE 1=1");
+            //strSql.AppendFormat("  AND TIME_OF_DEPARTURE = CONVERT(DATETIME, '{0}')", select.TIME_OF_DEPARTURE).AppendLine();
+            //strSql.AppendFormat("  AND FLIGHT_ID = '{0}'", select.FLIGHT_ID).AppendLine();
+            //strSql.AppendFormat("  AND PAX_NO = '{0}'", select.PAX_NO).AppendLine();
+            //strSql.AppendFormat("  AND EDA_NO = '{0}'", select.EDA_NO).AppendLine();
+            //strSql.AppendFormat("  AND DELETE_FLG IS NULL").AppendLine();
+
+            return strSql.ToString();
+        }
+
         /// <summary>
         /// データの設定（ユーザ毎のテーブルデータを入力する）
         /// </summary>
@@ -1374,7 +1519,7 @@ namespace JoySmtp.Nac
                     if (!shohindata.SURYO_TANI_CD2.SetData(Common.ConvertToStringUpper(row["SURYO_TANI_CD2"]))) errnum++;
                     if (!shohindata.KAZEI_KAKAKU.SetData(Common.ConvertToString(row["KAZEI_KAKAKU"]))) errnum++;
                     if (!shohindata.NAIKOKU_SHOHIZEITOU_SHUBETSU_CD1.SetData(Common.ConvertToStringUpper(row["NAIKOKU_SHOHIZEITOU_SHUBETSU_CD"]))) errnum++;
-                    if (!shohindata.NAIKOKU_SHOHIZEITOU_SHUBETSU_CD2.SetData("")) errnum++;
+                    if (!shohindata.NAIKOKU_SHOHIZEITOU_SHUBETSU_CD2.SetData(Common.ConvertToStringUpper(row["NAIKOKU_SHOHIZEITOU_SHUBETSU_CD2"]))) errnum++;
 
                     //if (string.IsNullOrWhiteSpace(shohindata.KANZEI_TAISHO.Data))
                     //{

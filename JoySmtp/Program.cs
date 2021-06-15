@@ -48,8 +48,8 @@ namespace JoySmtp
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
 
-                Application.Run(new FormStart(args));
-                //Application.Run(new Form1());
+                //Application.Run(new FormStart(args));
+                Application.Run(new FormMain(args));
 
             }
             finally

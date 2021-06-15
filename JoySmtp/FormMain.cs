@@ -9,6 +9,7 @@ using System.Xml.Linq;
 using System.Text;
 using System.Windows.Forms;
 using System.Reflection;
+using System.Net.Sockets;
 using Microsoft.Win32;
 using Microsoft.VisualBasic;
 using JoySmtp.CLogOut;
@@ -24,10 +25,7 @@ using SmtpServer;
 
 namespace JoySmtp
 {
-    /*************************/
-    /*　!未使用! 2021/06/04　*/
-    /*************************/
-    public partial class FormStart : Form
+    public partial class FormMain : Form
     {
         private Boolean blnFirstStartFlg = false;
         private InitProject InitProject = new InitProject ();
@@ -35,6 +33,7 @@ namespace JoySmtp
         /// 強制終了フラグ
         /// </summary>
         private Boolean i_SendStop;
+        private Boolean i_Error;
 
         private Boolean i_AutoFlg = false;
         //private int SYG_INTERVAL= 30;
@@ -61,17 +60,20 @@ namespace JoySmtp
 
         static public BindingList<Item> i_logs;
 
+        /// <summary>
+        /// 通常以外の通信
+        /// </summary>
         static BindingList<SendClass> i_sendList = new BindingList<SendClass>();
-        static BindingList<SendOnlyDataClass> i_sendDataList = new BindingList<SendOnlyDataClass>();
-        //未送信PAX_DATA
-        static List<DataRow> i_sendstacklist = new List<DataRow>();
-        //送信PAX_DATA
-        static List<DataRow> i_sendfinlist = new List<DataRow>();
+        /// <summary>
+        /// OTA通信時に使用するメールアドレス
+        /// </summary>
+        static BindingList<SendOnlyDataClass> i_sendMailList = new BindingList<SendOnlyDataClass>();
 
         //未送信PAX_DATA
-        static List<DBEdiSend> i_sendstacklist2 = new List<DBEdiSend>();
+        static List<DBEdiSend> i_sendstacklist = new List<DBEdiSend>();
+
         //送信PAX_DATA
-        static List<DBEdiSend> i_sendfinlist2 = new List<DBEdiSend>();
+        static List<DBEdiSend> i_sendfinlist = new List<DBEdiSend>();
 
         //未送信SYG_DATA
         static List<string> i_sygstacklist = new List<string>();
@@ -83,9 +85,12 @@ namespace JoySmtp
         /// 受信したけど送信データが何かわからないデータ
         /// </summary>
         static List<NaccsRecvModel> i_recvUnknownList = new List<NaccsRecvModel>(); 
-        //////送信用メールアドレス
-        //static SendOnlyDataClass i_sendData = null;
 
+        /// <summary>
+        /// 画面表示用の履歴デリゲート
+        /// </summary>
+        /// <param name="strState"></param>
+        /// <param name="strDetail"></param>
         delegate void SetShowLogDelegate(string strState, string strDetail);
         /// <summary>
         /// 画面表示追加
@@ -103,7 +108,7 @@ namespace JoySmtp
         }
 
         /// <summary>
-        /// 設定表示
+        /// 画面の上部設定表示
         /// </summary>
         public void SetTxtAppConfig()
         {
@@ -128,7 +133,7 @@ namespace JoySmtp
         /// <summary>
         /// コンストラクタ
         /// </summary>
-        public FormStart(string[] args)
+        public FormMain(string[] args)
         {
             InitializeComponent();
 
@@ -168,7 +173,6 @@ namespace JoySmtp
             //データベースアクセス関連
             InitProject.InitPublicInfo("");
 
-            //
             this.KeyPreview = true;
             this.KeyDown += new System.Windows.Forms.KeyEventHandler(this.Form1_KeyDown);
 
@@ -177,6 +181,7 @@ namespace JoySmtp
             timerNowTime.Interval = 1000;
             timerNowTime.Enabled = true;
             this.i_AutoFlg = false;
+            this.i_SendStop = false;
 
             //フォーム画面設定表示
             SetTxtAppConfig();
@@ -191,34 +196,33 @@ namespace JoySmtp
                 this.nextSYGTime = null;
             }
 
-            //以下は要らない？
-            if (HPFData.IntervalSendTimer > 0)
-            {
-                timerSend.Interval = 1000 * HPFData.IntervalSendTimer;
-            }
-            else
-            {
-                timerSend.Interval = 1000;
-            }
+            //if (HPFData.IntervalSendTimer > 0)
+            //{
+            //    timerSend.Interval = 1000 * HPFData.IntervalSendTimer;
+            //}
+            //else
+            //{
+            //    timerSend.Interval = 1000;
+            //}
 
 
-            if (HPFData.IntervalSYGTimer > 0)
-            {
-                timerSYG.Interval = 1000 * HPFData.IntervalSYGTimer;
-            }
-            else
-            {
-                timerSYG.Interval = 1000;
-            }
+            //if (HPFData.IntervalSYGTimer > 0)
+            //{
+            //    timerSYG.Interval = 1000 * HPFData.IntervalSYGTimer;
+            //}
+            //else
+            //{
+            //    timerSYG.Interval = 1000;
+            //}
 
             this.taskSend = new Task(SendFunc);
             this.taskSYGlist = new Task(SYGFunc);
             this.taskSYGget = new Task(SYGResultFunc);
 
-            //server = new ServerNaccs(serverBehaviour);
-
             SetShowLog("起動", "アプリを起動しました。");
 
+
+            //ホスト検索
             if (!string.IsNullOrEmpty(HPFData.DnsServer))
             {
                 //検索するホスト名（FQDN）またはIPアドレス
@@ -257,6 +261,14 @@ namespace JoySmtp
                 this.btnStart.PerformClick();
             }
 
+            //受信用のサーバーを起動しておく
+            StartServer();
+
+            //LogOut.ErrorOut(strInfo: "メール送信テスト", blnSendMail: true, strType: "test");
+
+            //LogOut.ErrorOut(strInfo: "メール送信テスト２", blnSendMail: true, strType: "test");
+
+            //SetDeclarationStatus(false);
         }
 
 
@@ -332,16 +344,10 @@ namespace JoySmtp
                 if (ConfirmRecvData(message, out resultstring))
                 {
                     LogOut.InfoOut(resultstring, this.Name, MethodBase.GetCurrentMethod().Name);
-//#if DEBUG
-//                    SetShowLog("受信", resultstring);
-//#endif
                 }
                 else
                 {
                     LogOut.ErrorOut(resultstring, this.Name, MethodBase.GetCurrentMethod().Name);
-//#if DEBUG
-//                    SetShowLog("異常", resultstring);
-//#endif
                 }
 
                 this.dataGridViewLog.Refresh();
@@ -388,17 +394,17 @@ namespace JoySmtp
             this.btnStop.Enabled = true;
             this.i_AutoFlg = true;
             this.i_SendStop = false;
+            this.i_Error = false;
 
             SetShowLog("開始","自動処理開始ボタンをクリックしました。");
 
-            StartServer();
             //i_sendList = new BindingList<SendClass>();
 
             this.btnStart.Enabled = false;
             //i_sendData = null;
 
             //メールアドレスの設定？
-            i_sendDataList = new BindingList<SendOnlyDataClass>();
+            i_sendMailList = new BindingList<SendOnlyDataClass>();
             SendOnlyDataClass mail =  new SendOnlyDataClass(
                 HPFData.ServerAddress,
                 HPFData.PortNo,
@@ -407,25 +413,22 @@ namespace JoySmtp
                 HPFData.ToMailAddress,
                 HPFData.MyServerName
             );
-            i_sendDataList.Add(mail);
+            i_sendMailList.Add(mail);
 
-            i_sendstacklist = new List<DataRow>();
-            i_sendfinlist = new List<DataRow>();
+            i_sendstacklist = new List<DBEdiSend>();
+            i_sendfinlist = new List<DBEdiSend>();
             i_sygstacklist = new List<string>();
             i_sygfinlist = new List<string>();
 
             i_recvUnknownList = new List<NaccsRecvModel>();
-#if DEBUG
-            //OTHERFunc();
-#endif
 
-            if (HPFData.IntervalSYGTimer > 0)
-            {
-                this.nextSYGTime = DateTime.Now;
-            }
             if( HPFData.IntervalSendTimer > 0 )
             {
-                this.nextSendTime = DateTime.Now.AddSeconds(5);
+                this.nextSendTime = DateTime.Now;
+            }
+            if (HPFData.IntervalSYGTimer > 0)
+            {
+                this.nextSYGTime = DateTime.Now.AddSeconds(10);
             }
         }
 
@@ -445,11 +448,13 @@ namespace JoySmtp
                 this.btnStart.Enabled = true;
                 this.i_AutoFlg = false;
 
-                StopServer();
+                this.i_SendStop = true;
 
-                //各スレッド処理を停止する
-                this.timerSend.Stop();
-                this.timerSYG.Stop();
+                //StopServer();
+
+                ////各スレッド処理を停止する
+                //this.timerSend.Stop();
+                //this.timerSYG.Stop();
 
                 this.btnStop.Enabled = false;
             }
@@ -471,46 +476,13 @@ namespace JoySmtp
             }
             else
             {
+                StopServer();
+                this.SetDeclarationStatus(false);
                 LogOut.InfoOut("終了", this.Name, MethodBase.GetCurrentMethod().Name);
             }
         }
 
         #endregion
-
-
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="sender"></param>
-        /// <param name="e"></param>
-        private void timerSend_Tick(object sender, EventArgs e)
-        {
-            //if (this.i_AutoFlg)
-            //{
-            //    //送信用セッションのスレッドが起動しているか確認する
-            //    if (this.taskSend.Status != TaskStatus.Running)
-            //    {
-            //        this.taskSend = new Task(SendFunc);
-
-            //        this.taskSend.Start();
-            //    }
-            //}
-        }
-        private void timerSYG_Tick(object sender, EventArgs e)
-        {
-            //if (this.i_AutoFlg)
-            //{
-            //    //SYGが送信済みの場合削除する★
-
-            //    //送信用セッションのスレッドが起動しているか確認する
-            //    if (this.taskSYGlist.Status != TaskStatus.Running)
-            //    {
-            //        this.taskSYGlist = new Task(SYGFunc);
-
-            //        this.taskSYGlist.Start();
-            //    }
-            //}
-        }
 
 
         /// <summary>
@@ -526,89 +498,113 @@ namespace JoySmtp
                 this.toolStripTime.Text = DateTime.Now.ToString("yyyy/MM/dd HH:mm:ss");
                 if (i_AutoFlg)
                 {
-                        //SYGデータ蓄積があるか？
-                        if (i_sygstacklist.Count > 0)
+                    if (this.i_Error)
+                    {
+                        this.btnStart.Enabled = true;
+                        this.i_AutoFlg = false;
+                        this.i_SendStop = true;
+
+                        //各スレッド処理を停止する
+                        this.btnStop.Enabled = false;
+                        this.Invoke(ssd, "異常", "自動処理　強制停止");
+                        LogOut.InfoOut("自動処理　強制停止", this.Name, MethodBase.GetCurrentMethod().Name);
+
+                        var ret = SetDeclarationStatus(false);
+                    }
+                    //SYGデータ蓄積があるか？
+                    else if (i_sygstacklist.Count > 0)
+                    {
+                        if (!IsRunningTask())
                         {
-                            if (!IsRunningTask())
+                            //使用可能なメールアドレスがあるか？
+                            if (i_sendMailList.Where(m => m.IsUse == true).Count() > 0)
                             {
-                                //使用可能なメールアドレスがあるか？
-                                if (i_sendDataList.Where(m => m.IsUse == true).Count() > 0)
-                                {
-                                    this.taskSYGget = new Task(SYGResultFunc);
-                                    this.taskSYGget.Start();
-                                }
+                                this.taskSYGget = new Task(SYGResultFunc);
+                                this.taskSYGget.Start();
+                                Thread.Sleep(2000);
                             }
                         }
-                        else if (i_sendstacklist.Count > 0)
+                    }
+                    //未送信データがあるか？
+                    else if (i_sendstacklist.Count > 0)
+                    {
+                        if (!IsRunningTask())
                         {
-                            if (!IsRunningTask())
+                            
+                            //使用可能なメールアドレスがあるか？
+                            if (i_sendMailList.Where(m => m.IsUse == true).Count() > 0)
                             {
-                                //使用可能なメールアドレスがあるか？
-                                if (i_sendDataList.Where(m => m.IsUse == true).Count() > 0)
+                                //送信して良いか？
+                                if (ConfirmGetDecLarationStatus())
                                 {
-                                    this.i_SendStop = false;
+                                    //this.i_SendStop = false;
                                     this.taskSend = new Task(SendFunc);
                                     this.taskSend.Start();
                                 }
+                                Thread.Sleep(2000);
                             }
                         }
-                        else if (this.nextSendTime != null && this.nextSendTime < DateTime.Now)
+                    }
+                    //更新タイミングかどうか？
+                    else if (this.nextSendTime != null && this.nextSendTime < DateTime.Now)
+                    {
+                        this.nextSendTime = DateTime.Now.AddSeconds(HPFData.IntervalSendTimer);
+                        //送信用セッションのスレッドが起動しているか確認する
+                        if (!IsRunningTask())
                         {
-                            this.nextSendTime = DateTime.Now.AddSeconds(HPFData.IntervalSendTimer);
-                            //送信用セッションのスレッドが起動しているか確認する
-                            if (!IsRunningTask())
+                            //使用可能なメールアドレスがあるか？
+                            if (i_sendMailList.Where(m => m.IsUse == true).Count() > 0)
                             {
-                                //使用可能なメールアドレスがあるか？
-                                if (i_sendDataList.Where(m => m.IsUse == true).Count() > 0)
+                                //DBに未送信データを確認する
+                                ConfirmSnedData();
+
+                                //送信する内容があるか？
+                                if (i_sendstacklist.Count > 0)
                                 {
                                     //送信して良いか？
                                     if (ConfirmGetJotaiAndTanto())
                                     {
-                                        //DBに未送信データを確認する
-                                        ConfirmSnedData();
-
-                                        //送信する内容があるか？
-                                        if (i_sendstacklist2.Count > 0)
-                                        {
-                                            this.i_SendStop = false;
-                                            this.taskSend = new Task(SendFunc);
-                                            this.taskSend.Start();
-                                        }
+                                        //this.i_SendStop = false;
+                                        this.taskSend = new Task(SendFunc);
+                                        this.taskSend.Start();
                                     }
+                                    Thread.Sleep(2000);
                                 }
-                            }
-                            else
-                            {
-                                //処理中の場合どうする？★★★
-                                this.nextSendTime = DateTime.Now.AddSeconds(30);
-                            }
-                        }//SYGタスク
-                        else if (this.nextSYGTime != null && this.nextSYGTime < DateTime.Now)
-                        {
-                            this.nextSYGTime = DateTime.Now.AddMinutes(HPFData.IntervalSYGTimer);
-
-                            //送信用セッションのスレッドが起動しているか確認する
-                            if (!IsRunningTask())
-                            {
-                                //送信して良いか？
-                                if (ConfirmGetJotaiAndTanto())
-                                {
-                                    this.taskSYGlist = new Task(SYGFunc);
-                                    this.taskSYGlist.Start();
-                                }
-                            }
-                            else
-                            {
-                                //処理中の場合5分後に再確認
-                                this.nextSYGTime = DateTime.Now.AddMinutes(5);
                             }
                         }
+                        else
+                        {
+                            //処理中の場合どうする？30秒後に確認
+                            this.nextSendTime = DateTime.Now.AddSeconds(30);
+                        }
                     }
-                    if (i_sendDataList.Where(m => m.IsUse == false).Count() > 0)
+                    //SYGタスク確認
+                    else if (this.nextSYGTime != null && this.nextSYGTime < DateTime.Now)
+                    {
+                        this.nextSYGTime = DateTime.Now.AddMinutes(HPFData.IntervalSYGTimer);
+
+                        //送信用セッションのスレッドが起動しているか確認する
+                        if (!IsRunningTask())
+                        {
+                            //送信して良いか？
+                            if (ConfirmGetJotaiAndTanto())
+                            {
+                                this.taskSYGlist = new Task(SYGFunc);
+                                this.taskSYGlist.Start();
+                            }
+                        }
+                        else
+                        {
+                            //処理中の場合5分後に再確認
+                            this.nextSYGTime = DateTime.Now.AddMinutes(5);
+                        }
+                    }
+
+                    if (i_sendMailList.Where(m => m.IsUse == false).Count() > 0)
                     {
                         ConfirmUseAddress();
                     }
-                
+                }                
             }
             catch (Exception ex)
             {
@@ -640,15 +636,17 @@ namespace JoySmtp
             bool ret = false;
             SetShowLogDelegate ssd = new SetShowLogDelegate(SetShowLog);
             SendOnlyDataClass mail = null;
+            //DBEdiSend selectEdi = new DBEdiSend();
 
             resultstring = "";
             try
             {
                 //受信したデータの出力共通項目を確認する
                 OutputCommonModel common = new OutputCommonModel();
-                INaccs nac;
+                //INaccs nac;
                 var btRecv = common.EUC.GetBytes(model.Parts.Body + "\r\n");
                 long lngSeq = 0;
+                Boolean flg = false;
 
                 if (!common.SetData(btRecv, model.ReceivedDate, out lngSeq))
                 {
@@ -661,10 +659,27 @@ namespace JoySmtp
                 else
                 {
                     //解析する
-                    LogOut.FileOut(model.Message.Session.Log, common.REPORT_TYPE, common.GetFileName()); 
-//#if DEBUG
-//                    LogOut.FileOut(model.Parts.Body, common.REPORT_TYPE, "DEBUG_"+ common.GetFileName()); 
-//#endif
+                    LogOut.FileOut(model.Message.Session.Log, common.REPORT_TYPE, common.GetFileName());
+
+                    mail = FindSendMail(common);
+                    if (mail != null)
+                    {
+                        //selectEdi = mail.SelectData;
+                    }
+                    else
+                    {
+                        mail = i_sendMailList.Where(m => m.GetFromAddr.Equals(model.To)).FirstOrDefault();
+                        if (mail != null)
+                        {
+                            //selectEdi = mail.SelectData;
+                        }
+                        else
+                        {
+                            resultstring = "受信メールアドレス異常:" + model.Subject;
+                            this.Invoke(ssd, "警告", resultstring);
+                        }
+                    }
+                    //ret = selectEdi.SetSendTblRecv(common.REPORT_TYPE, lngSeq);
 
                     switch (common.REPORT_TYPE)
                     {
@@ -673,50 +688,30 @@ namespace JoySmtp
                             ProcessSad401Model nac401 = new ProcessSad401Model();
                             if (nac401.SetByteData(btRecv))
                             {
-                                var fname = LogOut.FileOutOTA(nac401.GetFileData(), LogOut.MAIL_PATH.RECV_MAIL_PATH, nac401.GetFileName());
-                                nac401.NaccsCommon.SetFileNameResultDB(fname, lngSeq);
-
-                                //受信結果をDBに上書きする
-                                var rln = ProcessInputModel.SetRecvDataToDB(nac401);
-                                if (rln)
+                                if (HPFData.ShoriShikibetsuTestFlg)
                                 {
-                                    //4031以降のデータが登録されていれば、EDI_STATUSを更新する
-                                    nac401.NaccsCommon.SetSameYNOResultDB(lngSeq);
-
-                                    resultstring = string.Format("処理結果通知を登録しました({0}:{1})", nac401.GetHandover, nac401.GetYunyuShinkokuNo);
-                                    mail = FindSendMail(common);
-                                    if (mail != null)
-                                    {
-                                        mail.RecvList.Add(nac401);
-                                        mail.SetRecvListReportType(common.REPORT_TYPE);
-                                        mail.YUNYU_SHINKOKU_NO = nac401.GetYunyuShinkokuNo;
-                                        this.Invoke(ssd, "正常", resultstring);
-                                    }
-                                    else
-                                    {
-                                        //見つからなかった場合は？
-                                        resultstring = string.Format("受信警告:送信データ該当なし({0})", nac401.GetYunyuShinkokuNo);
-                                        this.Invoke(ssd, "警告", resultstring);
-                                        ////一時保存リストに追加
-                                        //i_recvUnknownList.Add(nac401);
-                                    }
-                                    ret = true;
+                                    ret = mail.SelectData.SetSendTblRecv(common.REPORT_TYPE, lngSeq, strYunyu:nac401.GetYunyuShinkokuNo, strTorikomi: HPFData.TORIKOMI_JOTAI.KYOKA_ZUMI);
                                 }
                                 else
                                 {
-                                    //DB内に同じ電文がない
-                                    resultstring = string.Format("登録異常　DB該当なし({0}:{1})", nac401.GetHandover, nac401.GetInfoNo);
-                                    nac401.NaccsCommon.SetDBStatusMemo(lngSeq, strStatus:resultstring);
-                                    ////一時保存リストに追加
-                                    //i_recvUnknownList.Add(nac401);
+                                    ret = mail.SelectData.SetSendTblRecv(common.REPORT_TYPE, lngSeq, strYunyu:nac401.GetYunyuShinkokuNo);
                                 }
+                                if (mail != null)
+                                {
+                                    mail.RecvList.Add(nac401);
+                                    mail.SetRecvListReportType(common.REPORT_TYPE);
+                                    mail.YUNYU_SHINKOKU_NO = nac401.GetYunyuShinkokuNo;
+                                    this.Invoke(ssd, "正常", string.Format("{0}:受信{1}", mail.SelectData.PAX_NO, common.REPORT_TYPE.ToString()));
+                                }
+                                var fname = LogOut.FileOutOTA(nac401.GetFileData(), LogOut.MAIL_PATH.RECV_MAIL_PATH, nac401.GetFileName());
+                                nac401.NaccsCommon.SetFileNameResultDB(fname, lngSeq);                             
                                 ret = true;
                             }
                             else
                             {
                                 //401ではない？
                                 resultstring = string.Format("処理結果通知　解析異常", nac401.GetHandover, nac401.GetInfoNo);
-                                common.GetSQL_UPDATE_RESULT_MEMO_STAT(lngSeq, strStatus:resultstring);
+                                //common.GetSQL_UPDATE_RESULT_MEMO_STAT(lngSeq, strStatus:resultstring);
                             }
                             break;
                         case NACCS_REPORTTYPE.SAD4031:
@@ -729,54 +724,27 @@ namespace JoySmtp
                         case NACCS_REPORTTYPE.SAD4101:
                         case NACCS_REPORTTYPE.SAD4111:
                             ProcessSad403Model nac403 = new ProcessSad403Model();
-                            Boolean flg = false;
+
                             if (nac403.SetByteData(btRecv))
                             {
+                                ret = mail.SelectData.SetSendTblRecv(common.REPORT_TYPE, lngSeq, strTorikomi: HPFData.TORIKOMI_JOTAI.KYOKA_ZUMI);
+                                if (mail != null)
+                                {
+                                    mail.RecvList.Add(nac403);
+                                    mail.SetRecvListReportType(common.REPORT_TYPE);
+                                    mail.YUNYU_SHINKOKU_NO = nac403.GetYunyuShinkokuNo;
+                                    this.Invoke(ssd, "正常", string.Format("{0}:受信{1}",mail.SelectData.PAX_NO ,common.REPORT_TYPE.ToString() ));
+                                }
                                 var fname = LogOut.FileOutOTA(nac403.GetFileData(), LogOut.MAIL_PATH.RECV_MAIL_PATH, nac403.GetFileName());
                                 nac403.NaccsCommon.SetFileNameResultDB(fname, lngSeq);
 
-                                //受信結果をDBに上書きする
-                                flg = ProcessInputModel.SetResultRecvDataToDB(nac403.GetYunyuShinkokuNo, nac403.GetReportType);
-
-                                if (flg)
-                                {
-                                    flg = false;
-                                    //送信メールから同じ輸入申告番号を探す
-                                    foreach (var send in i_sendDataList)
-                                    {
-                                        if (send.YUNYU_SHINKOKU_NO == nac403.GetYunyuShinkokuNo)
-                                        {
-                                            send.RecvList.Add(nac403);
-                                            send.SetRecvListReportType(common.REPORT_TYPE);
-                                            mail = send;
-                                            this.Invoke(ssd, "受信", string.Format("登録No:{0}({1})", nac403.GetYunyuShinkokuNo, nac403.GetReportType.ToString()));
-                                            resultstring = "";
-                                            flg = true;
-                                            break;
-                                        }
-                                    }
-                                    if (flg)
-                                    {
-                                        resultstring = string.Format("異常:送信データ 該当なし({0})", nac403.GetYunyuShinkokuNo);
-                                        //一時保存リストに追加
-                                        i_recvUnknownList.Add(nac403);
-                                        this.Invoke(ssd, "警告", resultstring);
-                                    }
-                                }
-                                else
-                                {
-                                    resultstring = string.Format("異常:DB 該当なし({0})", nac403.GetYunyuShinkokuNo);
-                                    //一時保存リストに追加
-                                    i_recvUnknownList.Add(nac403);
-                                    this.Invoke(ssd, "異常", resultstring);
-                                }
                                 ret = true;
                             }
                             else
                             {
                                 resultstring = string.Format("処理結果通知　解析異常({0})", nac403.NaccsCommon.SUBJECT);
-                                common.GetSQL_UPDATE_RESULT_MEMO_STAT(lngSeq, strStatus: resultstring);
-                                this.Invoke(ssd, "異常", resultstring);
+                                //common.GetSQL_UPDATE_RESULT_MEMO_STAT(lngSeq, strStatus: resultstring);
+                                //this.Invoke(ssd, "異常", resultstring);
                             }
                             break;
                         //case NACCS_REPORTTYPE.SAD4131:
@@ -785,13 +753,18 @@ namespace JoySmtp
                             ProcessSaf001Model nac10 = new ProcessSaf001Model();
                             if (nac10.SetByteData(btRecv))
                             {
+                                string err = string.Format("警告通知：{0}", common.REPORT_TYPE.ToString());
+                                ret = mail.SelectData.SetSendTblRecv(common.REPORT_TYPE, lngSeq, strTorikomi: HPFData.TORIKOMI_JOTAI.KYOKA_ZUMI, strErr: err);
+
                                 //結果ファイルを加工して保存
                                 var fname = LogOut.FileOutOTA(nac10.GetFileData(), LogOut.MAIL_PATH.RECV_MAIL_PATH, nac10.GetFileName());
                                 nac10.NaccsCommon.SetFileNameResultDB(fname, lngSeq);
-                                ret = ProcessInputModel.SetResultRecvDataToDB(nac10.GetYunyuShinkokuNo, nac10.GetReportType);
+
+                                //ret = ProcessInputModel.SetResultRecvDataToDB(nac10.GetYunyuShinkokuNo, nac10.GetReportType);
 
                                 resultstring = string.Format("通知　受信 No:{0}({1})", nac10.GetYunyuShinkokuNo, nac10.GetReportType.ToString());
-                                this.Invoke(ssd, "正常", resultstring);
+                                this.Invoke(ssd, "警告", resultstring);
+                                //LogOut.ErrorOut(string.Format("{0} PAX NO:{1}", err, mail.SelectData.PAX_NO), this.Name, MethodBase.GetCurrentMethod().Name, true, NACCS_REPORTTYPE.RESULT.ToString());
                                 flg = true;
                             }
                             else
@@ -805,13 +778,17 @@ namespace JoySmtp
                             ProcessSaf002Model nac21 = new ProcessSaf002Model();
                             if (nac21.SetByteData(btRecv))
                             {
+                                string err = string.Format("警告通知：{0}", common.REPORT_TYPE.ToString());
+                                ret = mail.SelectData.SetSendTblRecv(common.REPORT_TYPE, lngSeq, strTorikomi: HPFData.TORIKOMI_JOTAI.KYOKA_ZUMI, strErr: err);
+
                                 //結果ファイルを加工して保存
                                 var fname = LogOut.FileOutOTA(nac21.GetFileData(), LogOut.MAIL_PATH.RECV_MAIL_PATH, nac21.GetFileName());
                                 nac21.NaccsCommon.SetFileNameResultDB(fname, lngSeq);
                                 ret = ProcessInputModel.SetResultRecvDataToDB(nac21.GetYunyuShinkokuNo, nac21.GetReportType);
 
-                                resultstring = string.Format("通知　受信 No:{0}({1})", nac21.GetYunyuShinkokuNo, nac21.GetReportType.ToString());
-                                this.Invoke(ssd, "正常", resultstring);
+                                resultstring = string.Format("通知　警告受信 No:{0}({1})", nac21.GetYunyuShinkokuNo, nac21.GetReportType.ToString());
+                                this.Invoke(ssd, "警告", resultstring);
+                                //LogOut.ErrorOut(string.Format("{0} PAX NO:{1}", err, mail.SelectData.PAX_NO), this.Name, MethodBase.GetCurrentMethod().Name, true, NACCS_REPORTTYPE.RESULT.ToString());
                                 flg = true;
                             }
                             else
@@ -825,13 +802,17 @@ namespace JoySmtp
                             ProcessSaf021Model nac211 = new ProcessSaf021Model();
                             if (nac211.SetByteData(btRecv))
                             {
+                                string err = string.Format("警告通知：{0}", common.REPORT_TYPE.ToString());
+                                ret = mail.SelectData.SetSendTblRecv(common.REPORT_TYPE, lngSeq, strTorikomi: HPFData.TORIKOMI_JOTAI.KYOKA_ZUMI, strErr: err);
+
                                 //結果ファイルを加工して保存
                                 var fname = LogOut.FileOutOTA(nac211.GetFileData(), LogOut.MAIL_PATH.RECV_MAIL_PATH, nac211.GetFileName());
                                 nac211.NaccsCommon.SetFileNameResultDB(fname, lngSeq);
-                                ret = ProcessInputModel.SetResultRecvDataToDB(nac211.GetYunyuShinkokuNo, nac211.GetReportType);
+                                //ret = ProcessInputModel.SetResultRecvDataToDB(nac211.GetYunyuShinkokuNo, nac211.GetReportType);
 
                                 resultstring = string.Format("通知　警告受信 No:{0}({1})", nac211.GetYunyuShinkokuNo, nac211.GetReportType.ToString());
-                                this.Invoke(ssd, "正常", resultstring);
+                                //LogOut.ErrorOut(string.Format("{0} PAX NO:{1}", err, mail.SelectData.PAX_NO), this.Name, MethodBase.GetCurrentMethod().Name, true, NACCS_REPORTTYPE.RESULT.ToString());
+                                this.Invoke(ssd, "警告", resultstring);
                                 flg = true;
                             }
                             else
@@ -845,13 +826,18 @@ namespace JoySmtp
                             ProcessSaf022Model nac221 = new ProcessSaf022Model();
                             if (nac221.SetByteData(btRecv))
                             {
+                                string err = string.Format("警告通知：{0}", common.REPORT_TYPE.ToString());
+                                ret = mail.SelectData.SetSendTblRecv(common.REPORT_TYPE, lngSeq, strTorikomi: HPFData.TORIKOMI_JOTAI.KYOKA_ZUMI, strErr: err);
+
                                 //結果ファイルを加工して保存
                                 var fname = LogOut.FileOutOTA(nac221.GetFileData(), LogOut.MAIL_PATH.RECV_MAIL_PATH, nac221.GetFileName());
                                 nac221.NaccsCommon.SetFileNameResultDB(fname, lngSeq);
-                                ret = ProcessInputModel.SetResultRecvDataToDB(nac221.GetYunyuShinkokuNo, nac221.GetReportType);
+
+                                //ret = ProcessInputModel.SetResultRecvDataToDB(nac221.GetYunyuShinkokuNo, nac221.GetReportType);
 
                                 resultstring = string.Format("通知　警告受信 No:{0}({1})", nac221.GetYunyuShinkokuNo, nac221.GetReportType.ToString());
                                 this.Invoke(ssd, "正常", resultstring);
+                                //LogOut.ErrorOut(string.Format("{0} PAX NO:{1}", err, mail.SelectData.PAX_NO), this.Name, MethodBase.GetCurrentMethod().Name, true, NACCS_REPORTTYPE.RESULT.ToString());
                                 flg = true;
                             }
                             else
@@ -862,10 +848,11 @@ namespace JoySmtp
                             }
                             break;
                         case NACCS_REPORTTYPE.SYG_RESULT:
+                            ret = mail.SelectData.SetSendTblRecv(common.REPORT_TYPE, lngSeq);
+
                             ProcessSYGRecvModel syg = new ProcessSYGRecvModel();
                             if (syg.SetByteData(btRecv))
                             {
-                                mail = FindSendMail(syg.NaccsCommon);
                                 if (mail != null)
                                 {
                                     mail.RecvList.Add(syg);
@@ -883,7 +870,8 @@ namespace JoySmtp
                             ProcessSYGRecvModel syglist = new ProcessSYGRecvModel();
                             if (syglist.SetByteData(btRecv))
                             {
-                                mail = FindSendMail(syglist.NaccsCommon);
+                                ret = mail.SelectData.SetSendTblRecv(common.REPORT_TYPE, lngSeq);
+
                                 if (mail != null)
                                 {
                                     mail.RecvList.Add(syglist);
@@ -900,7 +888,7 @@ namespace JoySmtp
                                     }
                                     LogOut.SendErrorMail(string.Format("【{0}】 SYG", Application.ProductName),
                                         string.Format("SYG受信　{0}件\r\n{1}\r\n{2}",syglist.InfoNum.GetIntData, log, syglist.GetFileName()),
-                                        string.Format("SYG受信　{0}件\r\n{1}\r\n{2}",syglist.InfoNum.GetIntData, log, syglist.GetFileName())
+                                        NACCS_REPORTTYPE.SYG_LIST.ToString()
                                         );                        
                                 }
                                 ret = true;
@@ -910,15 +898,24 @@ namespace JoySmtp
                             ProcessResultModel nacret = new ProcessResultModel();
                             if (nacret.SetByteData(btRecv))
                             {
-                                ////結果ファイルを加工して保存
-                                //var fname = LogOut.FileOutOTA(nacret.GetFileData(), LogOut.MAIL_PATH.RECV_MAIL_PATH, nacret.GetFileName());
-                                //nacret.NaccsCommon.SetFileNameResultDB(fname, lngSeq);
-
-                                //通常業務
-                                var rln = ProcessInputModel.SetRecvDataToDB(nacret.NaccsCommon.DENBUN_HANDOVER.Data, nacret.OUTPUT_RESULT, lngSeq, nacret.GetYunyuShinkokuNo );
-                                if (rln)
+                                Boolean blnErr;
+                                string strlogret = ProcessResultModel.GetLogResult(nacret.OUTPUT_RESULT, out blnErr);
+                                if(blnErr)
                                 {
-                                    resultstring = string.Format("処理結果通知を登録しました({0}:{1})", nacret.NaccsCommon.DENBUN_HANDOVER.Data, nacret.ResultList[0].Data);
+                                    ret = mail.SelectData.SetSendTblRecv(common.REPORT_TYPE, lngSeq, strTorikomi: HPFData.TORIKOMI_JOTAI.NACCS_ERROR, strErr: strlogret);
+                                    //LogOut.ErrorOut(
+                                    //    string.Format("PAXTRAXからの内容に項目異常が発生しました。PAX NO:{0}[{1}]", mail.SelectData.PAX_NO, strlogret),
+                                    //    this.Name, MethodBase.GetCurrentMethod().Name, blnErr, NACCS_REPORTTYPE.RESULT.ToString());
+                                }
+                                else
+                                {
+                                    ret = mail.SelectData.SetSendTblRecv(common.REPORT_TYPE, lngSeq, strErr: strlogret);
+                                }
+                                ////通常業務
+                                //var rln = ProcessInputModel.SetRecvDataToDB(nacret.NaccsCommon.DENBUN_HANDOVER.Data, nacret.OUTPUT_RESULT, lngSeq, nacret.GetYunyuShinkokuNo );
+                                if (ret)
+                                {
+                                    resultstring = string.Format("処理結果通知を登録しました({0}:{1}){2}", nacret.NaccsCommon.DENBUN_HANDOVER.Data, nacret.ResultList[0].Data, strlogret);
                                     this.Invoke(ssd, "正常", resultstring);
                                     ret = true;
                                 }
@@ -935,25 +932,20 @@ namespace JoySmtp
                                 this.Invoke(ssd, "異常", resultstring);
                             }
                             //送信メール検索
-                            mail = FindSendMail(nacret.NaccsCommon);
                             if (mail != null)
                             {
                                 mail.RecvList.Add(nacret);
                                 mail.SetRecvListReportType(common.REPORT_TYPE);
-                                if (!nacret.RESULT_FLG)
-                                {
-                                    //異常状態なので次へ
-                                    mail.ProcessFinFLG = true;
-                                }                                
                             }
-                            else
-                            {
-                                //i_recvUnknownList.Add(nacret);
-                                //見つからなかった場合は？
-                                resultstring += ((resultstring.Length > 0) ? "　　" : "") + string.Format("受信異常:送信データ該当なし({0})", nacret.GetHandover);
-                                //結果の中に異常を通知
-                                nacret.NaccsCommon.GetSQL_UPDATE_RESULT_MEMO_STAT(lngSeq, strStatus: resultstring);
-                            }
+
+                            //else
+                            //{
+                            //    //i_recvUnknownList.Add(nacret);
+                            //    //見つからなかった場合は？
+                            //    resultstring += ((resultstring.Length > 0) ? "　　" : "") + string.Format("受信異常:送信データ該当なし({0})", nacret.GetHandover);
+                            //    //結果の中に異常を通知
+                            //    nacret.NaccsCommon.GetSQL_UPDATE_RESULT_MEMO_STAT(lngSeq, strStatus: resultstring);
+                            //}
                             break;
                         case NACCS_REPORTTYPE.OTA:
                         case NACCS_REPORTTYPE.OTC:
@@ -965,8 +957,21 @@ namespace JoySmtp
                     }
                 }
 
-                //未処理データの確認
-                AssignRecvUnknownData(ref i_recvUnknownList);
+                if (mail.SelectData.PAX_NO != null)
+                {
+                    if (mail.SelectData.IsFinFlag)
+                    {
+                        flg = ProcessInputModel.SetDBT_PAX_H(mail.SelectData);
+                        if (flg)
+                        {
+                            mail.ProcessFinFLG = true;
+                        }
+                    }
+                }
+                IsSendMailFinish();
+
+                ////未処理データの確認
+                //AssignRecvUnknownData(ref i_recvUnknownList);
 
                 //if (mail != null)
                 //{
@@ -981,7 +986,7 @@ namespace JoySmtp
             }
             catch (Exception e)
             {
-                LogOut.ErrorOut(e.Message, this.GetType().Name, MethodBase.GetCurrentMethod().Name, true, e.Message);
+                LogOut.ErrorOut(e.Message, this.GetType().Name, MethodBase.GetCurrentMethod().Name, true, "ConfirmRecvData");
                 this.Invoke(ssd, "異常", e.Message);
                 //throw e;
                 return false;
@@ -999,7 +1004,7 @@ namespace JoySmtp
             try
             {
                 //送信メールから同じ電文引継情報を探す
-                foreach (var mail in i_sendDataList)
+                foreach (var mail in i_sendMailList)
                 {
                     if (mail.MessageSYG != null)
                     {
@@ -1048,8 +1053,8 @@ namespace JoySmtp
 
                 if (dsRecord.Tables[0].Rows.Count > 0)
                 {
-                    i_sendstacklist2 = DBEdiSend.GetDBEdiSendModel(dsRecord.Tables[0], NACCS_REPORTTYPE.OTA);
-                    i_sendfinlist2 = new List<DBEdiSend>();
+                    i_sendstacklist = DBEdiSend.GetDBEdiSendModel(dsRecord.Tables[0], NACCS_REPORTTYPE.OTA);
+                    i_sendfinlist = new List<DBEdiSend>();
                     return dsRecord.Tables[0].Rows.Count;
                     //List<DataRow> data = dsRecord.Tables[0].AsEnumerable().ToList<DataRow>();//Cast<String>().ToArray();
                     //i_sendstacklist = new List<DataRow>(data);
@@ -1080,18 +1085,18 @@ namespace JoySmtp
         /// 使用できるメールアドレスを確認する
         /// </summary>
         /// <returns></returns>
-        public static void ConfirmUseAddress()
+        public void ConfirmUseAddress()
         {
             try
             {
                 //送信メールから同じ電文引継情報を探す
-                foreach (var mail in i_sendDataList)
+                foreach (var mail in i_sendMailList)
                 {
                     if (mail.SendDate == DateTime.MinValue)
                     {
                         break;
                     }
-                    if (mail.SendDate.AddSeconds(SendOnlyDataClass.RECV_TIME_OUT_SEC) < DateTime.Now)
+                    if (mail.SendDate.AddSeconds(HPFData.TimeoutLimitTime) < DateTime.Now)
                     {
                         string str = "送信タイムアウト";
                         string str2 = "サーバー未応答";
@@ -1111,16 +1116,28 @@ namespace JoySmtp
                         //}
                         //else
                         //{
+                        Boolean sendflg = false;
                             if (mail.Message != null)
                             {
                                 //タイムアウトの詳細を追記
-                                mail.Message.SetResultDB(str, str2);
-                            }
+//                                mail.Message.SetResultDB(str, str2);
+                                mail.SelectData.SetSendTblRecv(NACCS_REPORTTYPE.NONE, 0, strErr: str, strErrDetail: str2, strTorikomi: HPFData.TORIKOMI_JOTAI.NACCS_ERROR);
+                                Boolean flg = ProcessInputModel.SetDBT_PAX_H(mail.SelectData);
+                                if (!flg)
+                                {
+                                    LogOut.ErrorOut("登録異常(T_PAX_H更新)", "FormStart", MethodBase.GetCurrentMethod().Name);
+                                    SetShowLog("異常", "登録異常(T_PAX_H更新)");
+                                }
+                                this.i_Error = true;
+                                sendflg = true;
+                            }                           
+                            LogOut.ErrorOut(string.Format("{0}:NACCS{1}", str, str2), "FormStart", MethodBase.GetCurrentMethod().Name, blnSendMail:sendflg, strType:str);
+
+                            this.SetDeclarationStatus(false);
                             //処理終了
-                            mail.ProcessFinFLG = true;
-                            
-                            LogOut.ErrorOut(string.Format("{0}:NACCS{1}", str, str2), "FormStart", MethodBase.GetCurrentMethod().Name, blnSendMail:true, strType:str);
+                            mail.ProcessFinFLG = true;  
                         //}
+
                     }
                 }
             }
@@ -1154,36 +1171,54 @@ namespace JoySmtp
                     var flg = Common.ConvertToInteger(row["YUNYUSHINKOKU_KADOJOTAI"]);
                     if (flg == 1)
                     {
-                        var kbn = Common.ConvertToInteger(row["TIME_KBN"]);
-                        var strUser = "";
-                        var strPass = "";
-                        if (kbn == 1)
+                        flg = Common.ConvertToInteger(row["PAXTRAX"]);
+                        if (flg != 1)
                         {
-                            strUser = Common.ConvertToString(row["CD1"]);
-                            strPass = Common.ConvertToString(row["PW1"]);
+                            var kbn = Common.ConvertToInteger(row["TIME_KBN"]);
+                            var strUser = "";
+                            var strPass = "";
+                            if (kbn == 1)
+                            {
+                                strUser = Common.ConvertToString(row["CD1"]);
+                                strPass = Common.ConvertToString(row["PW1"]);
+                            }
+                            else
+                            {
+                                strUser = Common.ConvertToString(row["CD2"]);
+                                strPass = Common.ConvertToString(row["PW2"]);
+                            }
+                            if (string.IsNullOrEmpty(strUser) || string.IsNullOrEmpty(strPass) || strUser.Length < 8)
+                            {
+                                HPFData.InputUserCode = HPFData.InputUserCodeDefault;
+                                HPFData.InputUserPass = HPFData.InputUserPassDefault;
+                                HPFData.NaccsShikibetsuNo = HPFData.NaccsShikibetsuNoDefault;
+                                LogOut.InfoOut("UserCode or UserPass Nothing.", "FormStart", MethodBase.GetCurrentMethod().Name);
+                            }
+                            else
+                            {
+                                HPFData.InputUserCode = strUser.Substring(0, strUser.Length - 3);
+                                HPFData.NaccsShikibetsuNo = strUser.Substring(strUser.Length - 3, 3);
+                                HPFData.InputUserPass = strPass;
+                            }
+
+                            var ret = SetDeclarationStatus(true);
+                            if (ret)
+                            {
+                                blnRet = true;
+                            }
+                            else
+                            {
+                                //変更できなかった
+                            }
                         }
                         else
                         {
-                            strUser = Common.ConvertToString(row["CD2"]);
-                            strPass = Common.ConvertToString(row["PW2"]);
+                            //JoyFlight稼働中
                         }
-                        if (string.IsNullOrEmpty(strUser) || string.IsNullOrEmpty(strPass) || strUser.Length < 8)
-                        {
-                            HPFData.InputUserCode = HPFData.InputUserCodeDefault;
-                            HPFData.InputUserPass = HPFData.InputUserPassDefault;
-                            HPFData.NaccsShikibetsuNo = HPFData.NaccsShikibetsuNoDefault;
-                            LogOut.InfoOut("UserCode or UserPass Nothing.", "FormStart", MethodBase.GetCurrentMethod().Name);
-                        }
-                        else
-                        {
-                            HPFData.InputUserCode = strUser.Substring(0, strUser.Length - 3);
-                            HPFData.NaccsShikibetsuNo = strUser.Substring(strUser.Length - 3, 3);
-                            HPFData.InputUserPass = strPass;
-                        }
-                        blnRet = true;
                     }
                     else
                     {
+                        //更新できないので待ち
                     }
                 }
                 else
@@ -1213,13 +1248,13 @@ namespace JoySmtp
             strSql.AppendLine("SELECT");
             strSql.AppendLine("  (");
             strSql.AppendLine("    SELECT TOP 1");
-            strSql.AppendLine("      KADOJOTAI");
+            strSql.AppendLine("      KADO_JOTAI");
             strSql.AppendLine("    FROM T_DECLARATION_STATUS");
             strSql.AppendFormat("    WHERE SHORI_SHURUI = '{0}'", HPFData.SHORI_SHURUI_DECLARATION).AppendLine();
             strSql.AppendLine("  ) AS YUNYUSHINKOKU_KADOJOTAI");
             strSql.AppendLine("  ,(");
             strSql.AppendLine("    SELECT TOP 1");
-            strSql.AppendLine("      KADOJOTAI");
+            strSql.AppendLine("      KADO_JOTAI");
             strSql.AppendLine("    FROM T_DECLARATION_STATUS");
             strSql.AppendFormat("    WHERE SHORI_SHURUI = '{0}'", HPFData.SHORI_SHURUI_PAXTRAX).AppendLine();
             strSql.AppendLine("  ) AS PAXTRAX");
@@ -1250,6 +1285,104 @@ namespace JoySmtp
             return strSql.ToString();
         }
         /// <summary>
+        /// NACCS送信するためのユーザー情報等を取得する
+        /// </summary>
+        /// <returns></returns>
+        public Boolean ConfirmGetDecLarationStatus()
+        {
+            DataBaseSQL objDb = null;
+            DataSet dsRecord = null;
+            objDb = new DataBaseSQL();
+            Boolean blnRet = false;
+
+            try
+            {
+                objDb.DBLogIn();
+
+                dsRecord = objDb.GetDataSet(GetSQL_DECLARATION_STATUS(), "T_DECLARATION_STATUS", false);
+
+                if (dsRecord.Tables[0].Rows.Count > 0)
+                {
+                    DataRow row = dsRecord.Tables[0].Rows[0];
+                    var flg = Common.ConvertToInteger(row["YUNYUSHINKOKU_KADOJOTAI"]);
+                    if (flg == 1)
+                    {
+                        flg = Common.ConvertToInteger(row["PAXTRAX"]);
+                        if (flg != 1)
+                        {
+                            flg = Common.ConvertToInteger(row["NACCS"]);
+                            if (flg != 1)
+                            {
+                                var ret = SetDeclarationStatus(true);
+                                if (ret)
+                                {
+                                    blnRet = true;
+                                }
+                                else
+                                {
+                                    //変更できなかった
+                                }
+                            }
+                            else
+                            {
+                                //NACCS処理中
+                                blnRet = true;
+                            }
+                        }
+                        else
+                        {
+                            //PAX稼働中
+                        }
+                    }
+                    else
+                    {
+                        //システム停止
+                    }
+                }
+                else
+                {
+                    //DBログイン異常
+                }
+                return blnRet;
+            }
+            catch (Exception ex)
+            {
+                LogOut.ErrorOut(ex.Message, "FormStart", MethodBase.GetCurrentMethod().Name);
+            }
+            finally
+            {
+                if (objDb != null)
+                {
+                    objDb.DBLogOut();
+                }
+            }
+            return blnRet;
+        }
+        public static string GetSQL_DECLARATION_STATUS()
+        {
+            StringBuilder strSql = new StringBuilder();
+            strSql.AppendLine("SELECT");
+            strSql.AppendLine("  (");
+            strSql.AppendLine("    SELECT TOP 1");
+            strSql.AppendLine("      KADO_JOTAI");
+            strSql.AppendLine("    FROM T_DECLARATION_STATUS");
+            strSql.AppendFormat("    WHERE SHORI_SHURUI = '{0}'", HPFData.SHORI_SHURUI_DECLARATION).AppendLine();
+            strSql.AppendLine("  ) AS YUNYUSHINKOKU_KADOJOTAI");
+            strSql.AppendLine("  ,(");
+            strSql.AppendLine("    SELECT TOP 1");
+            strSql.AppendLine("      KADO_JOTAI");
+            strSql.AppendLine("    FROM T_DECLARATION_STATUS");
+            strSql.AppendFormat("    WHERE SHORI_SHURUI = '{0}'", HPFData.SHORI_SHURUI_PAXTRAX).AppendLine();
+            strSql.AppendLine("  ) AS PAXTRAX");
+            strSql.AppendLine("  ,(");
+            strSql.AppendLine("    SELECT TOP 1");
+            strSql.AppendLine("      KADO_JOTAI");
+            strSql.AppendLine("    FROM T_DECLARATION_STATUS");
+            strSql.AppendFormat("    WHERE SHORI_SHURUI = '{0}'", HPFData.SHORI_SHURUI_NACCS).AppendLine();
+            strSql.AppendLine("  ) AS NACCS");
+            return strSql.ToString();
+        }
+        /// <summary>
         /// 
         /// </summary>
         /// <param name="useflg"></param>
@@ -1264,21 +1397,93 @@ namespace JoySmtp
             strSql.AppendFormat("  ,UPD_TANMATU_ID = '{0}'", Environment.MachineName).AppendLine();
             strSql.AppendFormat("  ,VERSION_NO = VERSION_NO + 1", "").AppendLine();
 
-            strSql.AppendFormat("  ,KADOJOTAI = {0}", (useflg?"1":"0")).AppendLine();
+            strSql.AppendFormat("  ,KADO_JOTAI = {0}", (useflg ? "1" : "0")).AppendLine();
 
             strSql.AppendLine("WHERE 1=1");
             strSql.AppendFormat("  AND SHORI_SHURUI = '{0}'", HPFData.SHORI_SHURUI_NACCS).AppendLine();
             if(useflg)
             {
                 strSql.AppendFormat("  AND 0 = ").AppendLine();
-                strSql.AppendFormat("    (SELECT KADOJOTAI FROM T_DECLARATION_STATUS WHERE SHORI_SHURUI = '{0}')",
+                strSql.AppendFormat("    (SELECT KADO_JOTAI FROM T_DECLARATION_STATUS WHERE SHORI_SHURUI = '{0}')",
                     HPFData.SHORI_SHURUI_PAXTRAX).AppendLine();
             }
             return strSql.ToString();
         }
 
+        /// <summary>
+        /// システム間排他制御の値変更
+        /// </summary>
+        /// <param name="useflg"></param>
+        /// <returns></returns>
+        public Boolean SetDeclarationStatus(Boolean useflg)
+        {
+            DataBaseSQL objDb = null;
+            int ret = 0;
+            try
+            {
+                objDb = new DataBaseSQL();
+                objDb.DBLogIn();
+
+                objDb.BeginTransaction();
+
+                objDb.ExecuteNonQuery(GetSQL_UPDATE_T_DECLARATION_STATUS(useflg), null, out ret);
+
+                objDb.Commit();
+                    if (ret > 0)
+                {
+                    return true;
+                }
+                else
+                {
+                    return false;
+                }
+            }
+            catch (Exception e)
+            {
+                throw e;
+            }
+            finally
+            {
+                if (objDb != null)
+                {
+                    objDb.DBLogOut();
+                }
+            }
+        }
 
 
+        /// <summary>
+        /// 判明していない受信データの割り振り
+        /// </summary>
+        public Boolean IsSendMailFinish()
+        {
+            if (i_sendstacklist.Count == 0)
+            {
+                int cnt = 0;
+                foreach (var mail in i_sendMailList)
+                {
+                    if (!mail.ProcessFinFLG)
+                    {
+                        cnt++;
+                    }
+                }
+                if (cnt == 0)
+                {
+                    //終了しているから
+                    SetDeclarationStatus(false);
+                    return true;
+                }
+                else
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                //未送信データがある
+                return false;
+            }
+        }
         /// <summary>
         /// 判明していない受信データの割り振り
         /// </summary>
@@ -1296,7 +1501,7 @@ namespace JoySmtp
                         Boolean flg = ProcessInputModel.SetResultRecvDataToDB(recv.GetYunyuShinkokuNo, recv.GetReportType);
                         if (flg)
                         {
-                            foreach (var send in i_sendDataList)
+                            foreach (var send in i_sendMailList)
                             {
                                 if (send.YUNYU_SHINKOKU_NO == recv.GetYunyuShinkokuNo)
                                 {
@@ -1319,141 +1524,6 @@ namespace JoySmtp
             }
         }
 
-        ///// <summary>
-        ///// 送信確認タスク　OTA-OTE
-        ///// </summary>
-        //public void SendFunc()
-        //{
-        //    DataBaseSQL objDb = null;
-        //    DataSet dsRecord = null;
-        //    objDb = new DataBaseSQL();
-        //    Boolean sflg = false;
-        //    SetShowLogDelegate ssd = new SetShowLogDelegate(SetShowLog);
-        //    string strWhere = "";
-
-        //    try
-        //    {
-        //        //使われていないメールがあるか？
-        //        //メールListがNULLまたはFinishの場合
-        //        //なければERRORで返す？
-        //        foreach (var send in i_sendDataList)
-        //        {
-        //            if (send.IsUse)
-        //            {
-        //                objDb.DBLogIn();
-
-        //                DataRow selectRow = i_sendstacklist.First();
-        //                i_sendfinlist.Add(selectRow);
-        //                i_sendstacklist.Remove(selectRow);
-                        
-        //                string pno = selectRow.Field<string>("PAX_NO");
-        //                string eno = selectRow.Field<string>("EDA_NO");
-
-        //                //一件だけ取得する
-        //                dsRecord = objDb.GetDataSet(ProcessInputModel.GetSQL_SELECT(pno, eno), "T_PAX", false);
-
-        //                if (dsRecord != null)
-        //                {
-        //                    //送信内容のリセット
-        //                    send.Reset();
-        //                    List<DataTable> dtList = new List<DataTable>();
-
-        //                    //PAX？毎に振り分け
-        //                    ProcessInputModel.AnalyzedDataSet(dsRecord, out dtList, out strWhere);
-
-        //                    if (dtList.Count > 0)
-        //                    {
-        //                        this.Invoke(ssd, "送信", "EDI送信処理　開始 = " + (dtList[0].Rows[0])["PAX_NO"].ToString() + " " +(dtList[0].Rows[0])["EDA_NO"].ToString());
-        //                        LogOut.InfoOut("EDI送信処理　開始 :" + (dtList[0].Rows[0])["PAX_NO"].ToString() + " " + (dtList[0].Rows[0])["EDA_NO"].ToString(), this.Name, MethodBase.GetCurrentMethod().Name);
-
-        //                        ProcessInputModel input;
-        //                        InputCommonModel common = new InputCommonModel();
-
-        //                        ////取得データをすべて排他処理をする。
-        //                        //objDb.BeginTransaction();
-        //                        //objDb.ExecuteNonQuery(ProcessInputModel.GetSQL_HAITA("T_PAX_H", string.Format("AND PAX_NO = '{0}'", pno), true), null);
-        //                        //objDb.Commit();
-
-        //                        if (this.i_SendStop)
-        //                        {
-        //                            this.Invoke(ssd, "警告", "送信処理一時停止");
-        //                            break;
-        //                        }
-
-        //                        input = new ProcessInputModel();
-        //                        input.SetData(dtList[0]);
-
-        //                        send.Message = input;
-
-        //                        objDb.BeginTransaction();
-        //                        sflg = true;
-        //                        int intRet = 0;
-        //                        objDb.ExecuteNonQuery(input.GetSQL_UPDATE_SEND_H(), null, out intRet);
-        //                        if (intRet == 0)
-        //                        {
-        //                            LogOut.InfoOut("T_PAX_H 該当データなし", "FormStart", MethodBase.GetCurrentMethod().Name);
-        //                        }
-        //                        objDb.ExecuteNonQuery(input.GetSQL_UPDATE_SEND_D(), null);
-
-        //                        objDb.Commit();
-
-        //                        //送信処理
-        //                        send.SmtpSend();
-
-        //                        //i_sendfinlist.Add(selectRow);
-        //                        //i_sendstacklist.Remove(selectRow);
-
-        //                        this.Invoke(ssd, "送信", String.Format("PAX NO:{0} {1}", input.PAX_NO, input.EDA_NO));
-        //                    }//PAX毎に振り分け
-        //                    else
-        //                    {
-        //                        LogOut.InfoOut(string.Format("EDI送信処理　T_PAX_D データなし :{0}",pno), this.Name, MethodBase.GetCurrentMethod().Name);
-        //                        objDb.BeginTransaction();
-        //                        sflg = true;
-
-        //                        objDb.ExecuteNonQuery(ProcessInputModel.GetSQL_UPDATE_SEND_H_ERR(pno, eno, "T_PAX_D データなし"), null);
-
-        //                        objDb.Commit();
-
-        //                        //i_sendfinlist.Add(selectRow);
-        //                        //i_sendstacklist.Remove(selectRow);
-        //                    }
-        //                }
-        //                else
-        //                {
-        //                    //task終了
-        //                }
-        //            }
-        //            else
-        //            {
-        //                //空きがないので終了
-        //            }
-        //        }
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        if (sflg)
-        //        {
-        //            objDb.RollBack();
-        //        }
-        //        LogOut.ErrorOut(ex.Message, "FormStart", MethodBase.GetCurrentMethod().Name, true, ex.Message);
-        //        this.Invoke(ssd, "異常", ex.Message);
-        //    }
-        //    finally
-        //    {
-        //        if (objDb != null)
-        //        {
-        //            if (strWhere != "")
-        //            {
-        //                ////取得データをすべて排他処理の解除をする
-        //                //objDb.BeginTransaction();
-        //                //objDb.ExecuteNonQuery(ProcessInputModel.GetSQL_HAITA("T_PAX_H", strWhere), null);
-        //                //objDb.Commit();
-        //            }
-        //            objDb.DBLogOut();
-        //        }
-        //    }
-        //}
 
         /// <summary>
         /// 送信確認タスク　OTA-OTE
@@ -1472,111 +1542,125 @@ namespace JoySmtp
                 //使われていないメールがあるか？
                 //メールListがNULLまたはFinishの場合
                 //なければERRORで返す？
-                foreach (var send in i_sendDataList)
+                foreach (var send in i_sendMailList)
                 {
+                    if (this.i_SendStop)
+                    {
+                        break;
+                    }
                     if (send.IsUse)
                     {
-                        //このメールアドレスを使用する宣言！
-                        send.ProcessFinFLG = false;
+                        //送信内容のリセット
+                        send.Reset();
 
-                        objDb.DBLogIn();
+                        DBEdiSend selectRow = i_sendstacklist.FirstOrDefault();
 
-                        DBEdiSend selectRow = i_sendstacklist2.FirstOrDefault();
-
-                        if (selectRow == null)
+                        if (selectRow == null || string.IsNullOrWhiteSpace(selectRow.PAX_NO))
                         {
                             break;
                         }
-                        i_sendstacklist2.Remove(selectRow);
 
-                        DataTable dtcnt = objDb.GetDataTable(selectRow.GETSQL_SELECT_CNT(), "T_EDI_SEND", false);
-                        if (dtcnt != null)
+                        send.SelectData = selectRow;
+                        i_sendstacklist.Remove(selectRow);
+
+                        objDb.DBLogIn();
+
+                        DataTable dtcnt = objDb.GetDataTable(send.SelectData.GETSQL_SELECT_CNT(), "T_EDI_SEND", false);
+                        if (dtcnt.Rows.Count > 0)
                         {
-                            //送信済み！！
-                            continue;
-                        }
-                        else
-                        {
-                            //T_EDI_SENDに登録
-                            var seq = objDb.ExecuteScalar(selectRow.GetSQL_INSERT());
-                            selectRow.DATA_SEQ = seq;
-                        }
-
-                        //一件だけ取得する
-                        dsRecord = objDb.GetDataSet(ProcessInputModel.GetSQL_SELECT(selectRow), "T_PAX", false);
-
-                        if (dsRecord != null)
-                        {
-                            //送信内容のリセット
-                            send.Reset();
-                            List<DataTable> dtList = new List<DataTable>();
-
-                            //PAX？毎に振り分け
-                            ProcessInputModel.AnalyzedDataSet(dsRecord, out dtList, out strWhere);
-
-                            if (dtList.Count > 0)
+                            DataRow row = dtcnt.Rows[0];
+                            var val = Common.ConvertToString(row["TORIKOMI_JOTAI"]);
+                            //取り込み状態がエラーじゃなかったら送信しない
+                            if(val != HPFData.TORIKOMI_JOTAI.NACCS_ERROR)
                             {
-                                this.Invoke(ssd, "送信", "EDI送信処理　開始 = " + (dtList[0].Rows[0])["PAX_NO"].ToString() + " " + (dtList[0].Rows[0])["EDA_NO"].ToString());
-                                LogOut.InfoOut("EDI送信処理　開始 :" + (dtList[0].Rows[0])["PAX_NO"].ToString() + " " + (dtList[0].Rows[0])["EDA_NO"].ToString(), this.Name, MethodBase.GetCurrentMethod().Name);
-
-                                ProcessInputModel input;
-                                InputCommonModel common = new InputCommonModel();
-
-                                ////取得データをすべて排他処理をする。
-                                //objDb.BeginTransaction();
-                                //objDb.ExecuteNonQuery(ProcessInputModel.GetSQL_HAITA("T_PAX_H", string.Format("AND PAX_NO = '{0}'", pno), true), null);
-                                //objDb.Commit();
-
-                                if (this.i_SendStop)
+                                //送信済み！！
+                                ProcessInputModel.SetDBErrorT_PAX_H(send.SelectData, "警告：送信済TBLに同一PAX_NOが存在します", "送信済TBLに同一PAXNOが登録済");
+                                LogOut.InfoOut("EDI送信済のためキャンセルします:" + send.SelectData.PAX_NO + " " + send.SelectData.EDA_NO, this.Name, MethodBase.GetCurrentMethod().Name);
+                                this.Invoke(ssd, "警告", String.Format("EDI送信済のためキャンセルします:PAX NO:{0} {1}", send.SelectData.PAX_NO, send.SelectData.EDA_NO));
+                                send.ProcessFinFLG = true;
+                                if (i_sendstacklist.Count == 0)
                                 {
-                                    this.Invoke(ssd, "警告", "送信処理一時停止");
-                                    break;
+                                    this.SetDeclarationStatus(false);
                                 }
-
-                                input = new ProcessInputModel();
-                                input.SetData(dtList[0]);
-
-                                send.Message = input;
-
-                                objDb.BeginTransaction();
-
-                                sflg = true;
-                                int intRet = 0;
-                                objDb.ExecuteNonQuery(input.GetSQL_UPDATE_SEND_H(), null, out intRet);
-                                if (intRet == 0)
-                                {
-                                    LogOut.InfoOut("T_PAX_H 該当データなし", "FormStart", MethodBase.GetCurrentMethod().Name);
-                                }
-                                objDb.ExecuteNonQuery(input.GetSQL_UPDATE_SEND_D(), null);
-
-                                objDb.Commit();
-
-                                //送信処理
-                                send.SmtpSend();
-
-                                //i_sendfinlist.Add(selectRow);
-                                //i_sendstacklist.Remove(selectRow);
-
-                                this.Invoke(ssd, "送信", String.Format("PAX NO:{0} {1}", input.PAX_NO, input.EDA_NO));
-                            }//PAX毎に振り分け
-                            else
-                            {
-                                LogOut.InfoOut(string.Format("EDI送信処理　T_PAX_D データなし :{0}", selectRow.PAX_NO), this.Name, MethodBase.GetCurrentMethod().Name);
-                                //objDb.BeginTransaction();
-                                //sflg = true;
-
-                                //objDb.ExecuteNonQuery(ProcessInputModel.GetSQL_UPDATE_SEND_H_ERR(selectRow.PAX_NO, selectRow.EDA_NO, "T_PAX_D データなし"), null);
-
-                                //objDb.Commit();
-
-                                //i_sendfinlist.Add(selectRow);
-                                //i_sendstacklist.Remove(selectRow);
+                                continue;
                             }
                         }
-                        else
-                        {
-                            //task終了
-                        }
+                        //else
+                        //{
+                            this.Invoke(ssd, "送信", "EDI送信処理　開始 = " + send.SelectData.PAX_NO + " " + send.SelectData.EDA_NO);
+                            LogOut.InfoOut("EDI送信処理　開始 :" + send.SelectData.PAX_NO + " " + send.SelectData.EDA_NO, this.Name, MethodBase.GetCurrentMethod().Name);
+
+                            //一件だけ取得する
+                            dsRecord = objDb.GetDataSet(ProcessInputModel.GetSQL_SELECT(send.SelectData), "T_PAX", false);
+
+                            if (dsRecord != null)
+                            {
+                                List<DataTable> dtList = new List<DataTable>();
+
+                                //PAX？毎に振り分け
+                                ProcessInputModel.AnalyzedDataSet(dsRecord, out dtList, out strWhere);
+
+                                if (dtList.Count > 0)
+                                {
+                                    if (this.i_SendStop)
+                                    {
+                                        break;
+                                    }
+                                    ProcessInputModel input;
+                                    InputCommonModel common = new InputCommonModel();
+
+                                    input = new ProcessInputModel();
+                                    input.SetData(dtList[0]);
+
+                                    send.Message = input;
+
+                                    objDb.BeginTransaction();
+
+                                    //T_EDI_SENDに登録
+                                    send.SelectData.DENBUN_HANDOVER = input.GetHandover;
+                                    var seq = objDb.ExecuteScalar(send.SelectData.GetSQL_INSERT());
+                                    if (seq > 0)
+                                    {
+                                        send.SelectData.DATA_SEQ = seq;
+
+                                        sflg = true;
+                                        int intRet = 0;
+
+                                        //T_PAX_H に送信済みを書き込む
+                                        objDb.ExecuteNonQuery(input.GetSQL_UPDATE_SEND_H(), null, out intRet);
+                                        if (intRet == 0)
+                                        {
+                                            LogOut.InfoOut("T_PAX_H 該当データなし", "FormStart", MethodBase.GetCurrentMethod().Name);
+                                        }
+                                        //T_PAX_D に送信済みを書き込む
+                                        objDb.ExecuteNonQuery(input.GetSQL_UPDATE_SEND_D(), null);
+
+                                        objDb.Commit();
+
+                                        //送信処理
+                                        send.SmtpSend();
+
+                                        this.Invoke(ssd, "送信", String.Format("PAX NO:{0} {1}", input.PAX_NO, input.EDA_NO));
+                                        LogOut.InfoOut(string.Format("EDI送信済み:{0}", send.SelectData.PAX_NO), this.Name, MethodBase.GetCurrentMethod().Name);
+                                    }
+                                }//PAX毎に振り分け
+                                else
+                                {
+                                    LogOut.InfoOut(string.Format("EDI送信処理　T_PAX_D データなし :{0}", send.SelectData.PAX_NO), this.Name, MethodBase.GetCurrentMethod().Name);
+                                    var flg = ProcessInputModel.SetDBErrorT_PAX_H(send.SelectData, "T_PAX_D データなし", "T_PAX_D データなし");
+                                    if (!flg)
+                                    {
+                                        this.Invoke(ssd, "異常", "T_PAX_Hに異常内容を保存できませんでした。(" + send.SelectData.PAX_NO + " " + send.SelectData.EDA_NO + ")");
+                                        LogOut.ErrorOut("T_PAX_H保存処理　失敗 :" + send.SelectData.PAX_NO + " " + send.SelectData.EDA_NO, this.Name, MethodBase.GetCurrentMethod().Name);
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                this.Invoke(ssd, "送信", "情報を取得できませんでした。(" + send.SelectData.PAX_NO + " " + send.SelectData.EDA_NO + ")");
+                                LogOut.InfoOut("EDI送信処理　失敗 :" + send.SelectData.PAX_NO + " " + send.SelectData.EDA_NO, this.Name, MethodBase.GetCurrentMethod().Name);
+                            }
+                        //}//重複チェック
                     }
                     else
                     {
@@ -1584,13 +1668,18 @@ namespace JoySmtp
                     }
                 }
             }
+            catch (SocketException Socex)
+            {
+                this.i_Error = true;
+                LogOut.ErrorOut(Socex.ToString() + ":" + Socex.ErrorCode.ToString(), "SendOnlyDataClass", "PopBeforeSmtp", blnSendMail: true, strType: "SMTP通信");
+            }
             catch (Exception ex)
             {
                 if (sflg)
                 {
                     objDb.RollBack();
                 }
-                LogOut.ErrorOut(ex.Message, "FormStart", MethodBase.GetCurrentMethod().Name, true, ex.Message);
+                LogOut.ErrorOut(ex.Message, this.Name, MethodBase.GetCurrentMethod().Name, blnSendMail: true, strType: "送信処理");
                 this.Invoke(ssd, "異常", ex.Message);
             }
             finally
@@ -1622,8 +1711,12 @@ namespace JoySmtp
                 //使われていないメールがあるか？
                 //メールListがNULLまたはFinishの場合
                 //なければERRORで返す？
-                foreach (var send in i_sendDataList)
+                foreach (var send in i_sendMailList)
                 {
+                    if (this.i_SendStop)
+                    {
+                        break;
+                    }
                     if (send.IsUse)
                     {
                         //送信内容のリセット
@@ -1637,8 +1730,15 @@ namespace JoySmtp
 #if DEBUG
                         this.Invoke(ssd, "確認", "SYG通信確認");
 #endif
+                        break;
                     }
                 }
+            }
+            catch (SocketException Socex)
+            {
+                this.i_Error = true;
+                LogOut.ErrorOut(Socex.ToString() + ":" + Socex.ErrorCode.ToString(), "SendOnlyDataClass", "PopBeforeSmtp", blnSendMail: true, strType: "SMTP通信(SYG)");
+
             }
             catch (Exception ex)
             {
@@ -1696,6 +1796,11 @@ namespace JoySmtp
                     }
                 }
             }
+            catch (SocketException Socex)
+            {
+                LogOut.ErrorOut(Socex.ToString() + ":" + Socex.ErrorCode.ToString(), "SendOnlyDataClass", "PopBeforeSmtp", blnSendMail: true, strType: "SMTP通信(OTHER)");
+                this.i_Error = true;
+            }
             catch (Exception ex)
             {
                 LogOut.ErrorOut(ex.Message, this.GetType().Name, MethodBase.GetCurrentMethod().Name);
@@ -1713,7 +1818,7 @@ namespace JoySmtp
             {
                 LogOut.InfoOut("SYG再送信要求処理開始", this.Name, MethodBase.GetCurrentMethod().Name);
 
-                foreach (var send in i_sendDataList)
+                foreach (var send in i_sendMailList)
                 {
                     if (send.IsUse)
                     {
@@ -1734,6 +1839,11 @@ namespace JoySmtp
                         }
                     }
                 }
+            }
+            catch (SocketException Socex)
+            {
+                LogOut.ErrorOut(Socex.ToString() + ":" + Socex.ErrorCode.ToString(), "SendOnlyDataClass", "PopBeforeSmtp", blnSendMail: true, strType: "SMTP通信(OTHER)");
+                this.i_Error = true;
             }
             catch (Exception ex)
             {

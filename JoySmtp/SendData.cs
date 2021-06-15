@@ -28,6 +28,9 @@ namespace JoySmtp
         /// 処理完了フラグ
         /// </summary>
         public Boolean ProcessFinFLG = true;
+
+        public DBEdiSend SelectData;
+
         /// <summary>
         /// 送信用のデータ格納
         /// </summary>
@@ -106,29 +109,49 @@ namespace JoySmtp
         {
             get
             {
-                if (this.ProcessFinFLG)
+                return this.ProcessFinFLG;
+                //if (this.ProcessFinFLG)
+                //{
+                //    return true;
+                //}
+                //else
+                //{
+                //    if (Message != null || MessageSYG != null)
+                //    {
+                //        NACCS_REPORTTYPE type = (Message != null) ? Message.ReportType : MessageSYG.ReportType;
+                //        var list = NaccsSendModel.SetRecvRequiredList(type);
+                //        if (list.All(x => i_RecvListReportType.Contains(x)))
+                //        {
+                //            return true;
+                //        }
+                //        return false;
+                //    }
+                //    else
+                //    {
+                //        return false;
+                //    }
+                //}
+            }
+        }
+        public Boolean IsRecvComplete(Boolean flg = false)
+        {
+            if (Message != null || MessageSYG != null)
+            {
+                NACCS_REPORTTYPE type = (Message != null) ? Message.ReportType : MessageSYG.ReportType;
+                var list = NaccsSendModel.SetRecvRequiredList(type, flg);
+                if (list.All(x => i_RecvListReportType.Contains(x)))
                 {
                     return true;
                 }
-                else
-                {
-                    if (Message != null || MessageSYG != null)
-                    {
-                        NACCS_REPORTTYPE type = (Message != null) ? Message.ReportType : MessageSYG.ReportType;
-                        var list = NaccsSendModel.SetRecvRequiredList(type);
-                        if (list.All(x => i_RecvListReportType.Contains(x)))
-                        {
-                            return true;
-                        }
-                        return false;
-                    }
-                    else
-                    {
-                        return false;
-                    }
-                }
+                return false;
             }
+            else
+            {
+                return false;
+            }
+
         }
+
         /// <summary>
         /// 初期化
         /// </summary>
@@ -153,6 +176,8 @@ namespace JoySmtp
             this.ProcessFinFLG = true;
             this.SendDate = DateTime.MinValue;
             this.SendNum = 0;
+
+            this.SelectData = new DBEdiSend();
         }
         /// <summary>
         /// 初期化
@@ -167,13 +192,14 @@ namespace JoySmtp
             this.Message = null;
             this.MessageSYG = null;
 
-            this.ProcessFinFLG = true;
+            this.ProcessFinFLG = false;
             this.SendDate = DateTime.MinValue;
             this.RecvList = new List<NaccsRecvModel>();
             this.i_RecvListReportType = new List<NACCS_REPORTTYPE>();
 
             //this.YUNYU_SHINKOKU_NO = "";
             this.SendNum = 0;
+            this.SelectData = new DBEdiSend();
         }
 
         public enum SEND_STATUS
@@ -190,7 +216,15 @@ namespace JoySmtp
         protected String i_strServerSubAddr;
         protected int i_intPort = 25;
         protected String i_strFromAddr;
+        public string GetFromAddr
+        {
+            get { return this.i_strFromAddr; }
+        }
         protected String i_strToAddr;
+        public string GetToAddr
+        {
+            get { return this.i_strToAddr; }
+        }
         protected String i_strDns;
         protected String i_strDomain;
         protected String i_strServerName;

@@ -872,13 +872,13 @@ namespace JoySmtp.CLogOut
 
             try
             {
-                if (BeforeMailString.Equals(strType))
-                {
-                    if(BeforeSendDate.AddMinutes(20) > DateTime.Now)
+                //if (BeforeMailString.Equals(strType))
+                //{
+                    if(BeforeSendDate.AddMinutes(HPFData.MailSendLimit) > DateTime.Now)
                     {
                         return;
                     }
-                }
+                //}
                 BeforeMailString = strType;
                 BeforeSendDate = DateTime.Now;
 

@@ -342,33 +342,35 @@ namespace JoySmtp.DataBase
             int num = 10;
             int errcode = 0;
             intRet = 0;
-
-            while(num>0)
+            if (!string.IsNullOrWhiteSpace(query))
             {
-                try
+                while (num > 0)
                 {
-                    ExecuteNonQueryBase(query, paramDict, out intRet, out errcode);
-                    num = 0; 
-                }
-                catch (SqlException odbcEx)
-                {
-                    if(odbcEx.ErrorCode == 11 || odbcEx.ErrorCode == 1205)
+                    try
                     {
-
-                        num--;
-                        System.Threading.Thread.Sleep(5000);
+                        ExecuteNonQueryBase(query, paramDict, out intRet, out errcode);
+                        num = 0;
                     }
-                    else
+                    catch (SqlException odbcEx)
                     {
+                        if (odbcEx.ErrorCode == 11 || odbcEx.ErrorCode == 1205)
+                        {
+
+                            num--;
+                            System.Threading.Thread.Sleep(5000);
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        intRet = -1;
                         break;
                     }
-                }
-                catch (Exception ex)
-                {
-                    intRet = -1;
-                    break;
-                }
 
+                }
             }
         }
         /// <summary>
@@ -426,6 +428,11 @@ namespace JoySmtp.DataBase
         public int ExecuteScalar(string strSQL, bool blnUseTransaction = false)
         {
             SqlCommand sqlCom = new SqlCommand();
+            if (string.IsNullOrWhiteSpace(strSQL))
+            {
+                return -1;
+            }
+
             try
             {
                 LogOut.SQLOut(strSQL, "HPFDataBaseSQL", MethodBase.GetCurrentMethod().Name);

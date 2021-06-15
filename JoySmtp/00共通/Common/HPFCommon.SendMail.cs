@@ -6,11 +6,10 @@ namespace JoySmtp.JoyCommon
 {
     public partial class Common
     {
-
         // --------------------------------------
         // SMTPの認証情報
         // --------------------------------------
-        private string SmptServerHost = "103.241.129.20";
+        private string SmptServerHost = "smtp.conside.co.jp";//103.241.129.20";
         private int SmptServerPort = 587;
 
         private string SmptUserName = "nagisa1020tanaka@conside.co.jp";
@@ -22,8 +21,8 @@ namespace JoySmtp.JoyCommon
         // --------------------------------------
         // Mail内容
         // --------------------------------------
-        public string MailAddrFrom = "nagisa1020tanaka@conside.co.jp";
-        public string MailAddrTo = "nagisalife@gmail.com";
+        public string MailAddrFrom = "JoyFlight@conside.co.jp";
+        public string MailAddrTo = "nagisa1020tanaka@conside.co.jp";
 
         // 出荷指示自動アップロード対応 --Start Y.Yokota
         public string MailAddrCc = "";

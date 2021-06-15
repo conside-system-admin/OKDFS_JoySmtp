@@ -237,6 +237,13 @@ namespace JoySmtp.Nac
                     if (pos > 0) break;
 
                     var str = strRet.Substring(pos, 15);
+                    if (RESULT_SUCCESS.Equals(str))
+                    {
+                        ret = "";
+                        errflg = false;
+                        break;
+                    }
+
                     var data = str.Split('-');
 
                     if (data.Count() > 2)
@@ -277,6 +284,7 @@ namespace JoySmtp.Nac
                                         break;
                                     case "W"://注意喚起メッセージ関係
                                         ret = string.Format("注意喚起メッセージ関係({0})", str);
+                                        errflg = false;
                                         break;
                                     case "M"://指示メッセージ関係
                                         ret = string.Format("指示メッセージ関係({0})", str);
