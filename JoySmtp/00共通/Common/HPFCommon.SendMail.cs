@@ -13,7 +13,7 @@ namespace JoySmtp.JoyCommon
         private int SmptServerPort = 587;
 
         private string SmptUserName = "nagisa1020tanaka@conside.co.jp";
-        private string SmptUserPWD = "tanaka5310";
+        private string SmptUserPWD = "shiba600696";
 
         private bool UseDefaultCredentials = true;
         private bool EnableSsl = false;
