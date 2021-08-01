@@ -1,7 +1,21 @@
 <?xml version="1.0" encoding="shift_jis" standalone="yes"?>
 <NaccsSendMessage>
   <MessageType>SYG</MessageType>
-  <GyomuCd></GyomuCd>
+  <GyomuCd>TCC</GyomuCd>
   <SystemType>2</SystemType>
-  <Message></Message>
+  <Message>
+    <No>1</No>
+    <Len>50</Len>
+    <Contents>TEST1</Contents>
+  </Message>
+  <Message>
+    <No>2</No>
+    <Len>50</Len>
+    <Contents>2222</Contents>
+  </Message>
+  <Message>
+    <No>3</No>
+    <Len>1</Len>
+    <Contents></Contents>
+  </Message>
 </NaccsSendMessage>

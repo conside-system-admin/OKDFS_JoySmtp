@@ -619,7 +619,7 @@ namespace JoySmtp
         /// <summary>
         /// 送信用のデータ格納
         /// </summary>
-        public ProcessSYGSendModel MessageSYG
+        public NaccsSendModel MessageSYG
         {
             get;
             set;

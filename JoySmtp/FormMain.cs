@@ -263,7 +263,9 @@ namespace JoySmtp
 
             //受信用のサーバーを起動しておく
             StartServer();
-
+#if DEBUG
+            OTHERFunc();
+#endif
             //LogOut.ErrorOut(strInfo: "メール送信テスト", blnSendMail: true, strType: "test");
 
             //LogOut.ErrorOut(strInfo: "メール送信テスト２", blnSendMail: true, strType: "test");
@@ -1756,26 +1758,47 @@ namespace JoySmtp
             SetShowLogDelegate ssd = new SetShowLogDelegate(SetShowLog);
             try
             {
-                LogOut.InfoOut("OTHER送信処理開始", this.Name, MethodBase.GetCurrentMethod().Name);
-
                 string fname = System.AppDomain.CurrentDomain.SetupInformation.ApplicationBase + HPFData.TempMessageFileName;
                 //ファイルがあるか確認する
 
                 if (System.IO.File.Exists(fname))
                 {
+                    //LogOut.InfoOut("OTHER送信処理開始", this.Name, MethodBase.GetCurrentMethod().Name);
+                    LogOut.InfoOut("TCC送信処理開始", this.Name, MethodBase.GetCurrentMethod().Name);
+
                     //内容を確認する。
                     //xmlファイルを指定する
                     XElement xml = XElement.Load(fname);
 
                     string strInfoCd = xml.Element("GyomuCd").Value;
                     string strSysType = xml.Element("SystemType").Value;
-                    string strSendMes = xml.Element("Message").Value;
+                    List<string> strSendMes = new List<string>();
+
+                    var listdMes = xml.Element("Message").Value;
+                    var r = (from record in xml.Elements("Message")
+                             select (from element in record.Elements("No")
+                                     select element.Value));
+
+                    var recordList = from record in xml.Elements("Message") select record;
+                    int i = 0;
+                    foreach (var record in recordList)
+                    {
+                        if (i > 2) break;
+                        strSendMes.Add(record.Element("Contents").Value);
+                        i++;
+                    }
 
                     if (!string.IsNullOrEmpty(strInfoCd) &&
                         !string.IsNullOrEmpty(strSysType) &&
-                        !string.IsNullOrEmpty(strSendMes))
+                        strSendMes.Count>0)
                     {
-                        ProcessSYGSendModel syg = new ProcessSYGSendModel(strInfoCD: strInfoCd, strSysType: strSysType, strSendMes: strSendMes);
+                        ProcessTCCSendModel syg = new ProcessTCCSendModel(
+                            strInfoCD: strInfoCd,
+                            strSysType: strSysType,
+                            strSendMes1: strSendMes[0],
+                            strSendMes2: strSendMes[1],
+                            strSendMes3: strSendMes[2]
+                            );
 
                         SendClass smail = new SendClass(
                             HPFData.ServerAddress,
@@ -1792,7 +1815,8 @@ namespace JoySmtp
 
                         smail.SmtpSend(true);
 
-                        this.Invoke(ssd, "送信", "OTHER通信確認");
+                        this.Invoke(ssd, "送信", "TCC通信確認");
+                        //this.Invoke(ssd, "送信", "OTHER通信確認");
                     }
                 }
             }
